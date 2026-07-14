@@ -1,0 +1,53 @@
+# Pixelboard demo — ePHPm tuned for long-lived Datastar SSE streams.
+#
+# Every knob below was verified against crates/ephpm-config/src/lib.rs in the
+# ephpm source tree at the version this demo targets (v0.5.0).
+
+[server]
+listen = "0.0.0.0:8080"
+# Static assets are served straight from here even in worker mode; every
+# non-static request is dispatched to the worker script.
+document_root = "/app/public"
+
+[server.timeouts]
+# Applies to the whole request lifecycle in fpm mode, but for worker-mode
+# STREAMING responses it only covers the wait for status+headers — the SSE
+# body is exempt (verified: router.rs awaits only the header oneshot; the
+# streamed body flows afterward). Default 300 is fine; set explicitly for
+# documentation value.
+request = 300
+# Two effects on this demo:
+#  1. Connection-level: connections with no read/write activity are closed.
+#  2. Worker streaming: a client that stops READING for this long aborts the
+#     stream and frees the worker (stream_send_timeout = timeouts.idle).
+# The SSE loop sends a keepalive comment every 15 s, comfortably inside 60 s.
+idle = 60
+
+[php]
+# fpm mode CANNOT stream: the SAPI buffers all output (ub_write appends to a
+# buffer, flush() is a no-op) and the response is sent only when the script
+# ends. Worker mode has send_response_stream(), which delivers chunks as they
+# are produced — the only mode where SSE works today.
+mode = "worker"
+worker_script = "worker.php"
+
+# THE key knob for this demo: one SSE connection parks one worker thread for
+# its entire lifetime (workers handle exactly one request at a time), so
+# worker_count is the hard cap on concurrent SSE clients — plus the short
+# /tap and /paint actions need occasional free workers too. 16 threads
+# comfortably hosts ~12 browser tabs; raise it for load tests. Each worker is
+# a full PHP context (this script is tiny, so memory cost is low).
+worker_count = 16
+
+# 0 = never recycle. Recycling swaps a worker between requests, which is safe
+# with SSE (a stream finishes before its worker recycles) — but this script
+# leaks nothing, so recycling is pure churn.
+worker_max_requests = 0
+
+# Dispatch queue depth. 0 derives it from worker_count. When all workers are
+# parked on SSE streams, queued actions wait here until the request timeout
+# turns them into a 504 — if you see that, raise worker_count.
+worker_backlog = 0
+
+# The KV store ([kv]) needs no configuration: the in-process store backs the
+# ephpm_kv_* PHP functions out of the box. Defaults: 256MB cap, allkeys-lru.

@@ -1,0 +1,19 @@
+# Pixelboard — Datastar on ePHPm, one command:
+#
+#   docker compose up      # or: podman compose up
+#   open http://localhost:8080
+#
+# Open it in several tabs/devices — the counter, presence and pixels sync
+# live over one SSE stream per tab.
+
+name: datastar-pixelboard
+
+services:
+  ephpm:
+    image: docker.io/ephpm/ephpm:v0.5.0-php8.4
+    command: ["ephpm", "serve", "--config", "/app/ephpm.toml"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./public:/app/public:ro
+      - ./ephpm.toml:/app/ephpm.toml:ro
