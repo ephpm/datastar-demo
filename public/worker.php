@@ -26,11 +26,15 @@
  *   board:online  connected SSE clients (incr on connect, decr on disconnect)
  *   board:px:<i>  palette index of pixel i (absent = background)
  *
- * The SSE loop is version-polled: each connected client's worker polls
- * board:ver every POLL_US microseconds and, on change, re-renders the grid
- * and re-sends signals ("fat re-render" — Datastar morphs it into the DOM
- * by element id). See docs/ephpm-integration-spec.md for why polling (the
- * KV store has no pub/sub yet) and for the proposed ephpm_kv_wait() PR.
+ * The SSE loop is push-driven when the server provides ephpm_kv_wait()
+ * (ePHPm > v0.5.0): each connected client's worker BLOCKS on board:ver and
+ * wakes sub-millisecond on any mutation, with zero idle CPU. On older
+ * servers it degrades to the original version-poll loop (board:ver every
+ * POLL_US microseconds) — feature-detected via function_exists(). Either
+ * way, a change triggers a grid re-render + signals re-send ("fat
+ * re-render" — Datastar morphs it into the DOM by element id). See
+ * docs/ephpm-integration-spec.md for the analysis that led to the
+ * ephpm_kv_wait() and streaming-brotli ePHPm PRs.
  *
  * CONSTRAINT (verified in ephpm source, see the spec doc): one SSE
  * connection occupies one worker thread for its whole lifetime, so
@@ -44,6 +48,8 @@ const GRID_W  = 12;
 const GRID_H  = 12;
 const CELLS   = GRID_W * GRID_H;
 const POLL_US = 100_000;          // SSE version-poll interval: 100 ms
+                                  // (fallback only — unused when the server
+                                  // provides ephpm_kv_wait())
 const KEEPALIVE_S = 15.0;         // SSE comment ping — must stay well under
                                   // ephpm's [server.timeouts] idle (60 s)
 
@@ -204,7 +210,8 @@ final class SseStream
     /** @var resource|null set by PHP for wrapper instances */
     public $context;
 
-    private int $lastVer = -1;          // -1 forces an immediate first snapshot
+    private int $lastVer = -1;          // poll fallback: -1 forces first snapshot
+    private int $watchVer = 0;          // ephpm_kv_wait protocol: 0 = register+snapshot
     private float $lastWrite = 0.0;
     private string $buf = '';
 
@@ -223,19 +230,43 @@ final class SseStream
             return $out;
         }
 
-        // Block until the shared state version moves, then emit a snapshot.
         // Client disconnects are detected by ePHPm on WRITE (response_chunk
-        // fails and the pump stops), so the keepalive below also bounds how
-        // long a dead client can keep this worker (<= KEEPALIVE_S).
+        // fails and the pump stops), so the keepalive path below also bounds
+        // how long a dead client can keep this worker (<= KEEPALIVE_S).
+        return \function_exists('ephpm_kv_wait')
+            ? $this->readWait($count)
+            : $this->readPoll($count);
+    }
+
+    /**
+     * Push path (ePHPm with ephpm_kv_wait): BLOCK on board:ver until it is
+     * written, or until the keepalive budget runs out. Zero CPU while idle;
+     * wakeup latency is sub-millisecond instead of the poll interval.
+     *
+     * Protocol: the first call passes version 0, which registers the watch
+     * and returns the current version immediately (race-free snapshot);
+     * every later call passes the version the previous wakeup returned.
+     */
+    private function readWait(int $count): string
+    {
+        $budgetMs = (int) \max(1.0, (KEEPALIVE_S - (\microtime(true) - $this->lastWrite)) * 1000.0);
+        $r = \ephpm_kv_wait('board:ver', $this->watchVer, $budgetMs);
+        if ($r === false) {                     // keepalive tick
+            $this->lastWrite = \microtime(true);
+            return ": keepalive\n\n";
+        }
+        $this->watchVer = (int) $r['version'];
+        return $this->emitSnapshot($count);
+    }
+
+    /** Poll fallback (ePHPm <= v0.5.0): the original 100 ms version poll. */
+    private function readPoll(int $count): string
+    {
         while (true) {
             $ver = kv_int('board:ver');
             if ($ver !== $this->lastVer) {
                 $this->lastVer = $ver;
-                $this->buf = sse_snapshot();
-                $this->lastWrite = \microtime(true);
-                $out = \substr($this->buf, 0, $count);
-                $this->buf = (string) \substr($this->buf, $count);
-                return $out;
+                return $this->emitSnapshot($count);
             }
             if (\microtime(true) - $this->lastWrite >= KEEPALIVE_S) {
                 $this->lastWrite = \microtime(true);
@@ -243,6 +274,16 @@ final class SseStream
             }
             \usleep(POLL_US);
         }
+    }
+
+    /** Render a full snapshot into the buffer and return the first chunk. */
+    private function emitSnapshot(int $count): string
+    {
+        $this->buf = sse_snapshot();
+        $this->lastWrite = \microtime(true);
+        $out = \substr($this->buf, 0, $count);
+        $this->buf = (string) \substr($this->buf, $count);
+        return $out;
     }
 
     public function stream_eof(): bool

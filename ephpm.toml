@@ -51,3 +51,20 @@ worker_backlog = 0
 
 # The KV store ([kv]) needs no configuration: the in-process store backs the
 # ephpm_kv_* PHP functions out of the box. Defaults: 256MB cap, allkeys-lru.
+
+# ── ePHPm > v0.5.0 only ──────────────────────────────────────────────
+# Streaming brotli for the SSE stream. One encoder per connection whose
+# window persists for the stream's lifetime, flushed per event: after the
+# first snapshot every fat re-render collapses to a tiny delta against the
+# previous ones — measured ~420x fewer wire bytes over a 60 s pixelboard
+# session (exact numbers in README.md).
+# Safe to leave on: it only engages for text/event-stream responses to
+# clients that sent Accept-Encoding: br; the v0.5.0 image ignores unknown
+# keys, and newer servers warn+ignore unknown VALUES (default is "off").
+#
+# [server.response]
+# compression_streaming = "sse"
+#
+# The SSE loop itself needs no config for the other >v0.5.0 upgrade:
+# worker.php feature-detects ephpm_kv_wait() and switches from 100 ms
+# version-polling to blocking push (zero idle CPU, sub-ms wakeup).
