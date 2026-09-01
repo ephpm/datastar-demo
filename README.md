@@ -1,5 +1,10 @@
 # Pixelboard — Datastar on ePHPm
 
+> **Note (2026-08):** this demo was recorded against ePHPm **v0.5.0**; current
+> ePHPm is **v0.8.6**. The compose pin is kept at v0.5.0 so the validated
+> behaviour stays reproducible. Two of the "honest limitations" below have
+> since shipped fixes in ePHPm — see the notes inline.
+
 A multiplayer realtime demo: a shared tap counter, a live presence count,
 and a collaborative 12×12 pixel grid — synced across every open browser tab
 over Server-Sent Events. The whole backend is **one PHP file** running on
@@ -70,10 +75,15 @@ oha -z 10s -m POST http://localhost:8080/tap
    `ephpm.toml` (16 here) is the ceiling on concurrent viewers; actions
    compete for the remaining threads. Fine for a demo and small deployments;
    the spec doc proposes the ePHPm changes for real scale.
-3. **Fan-out is version-polling** (100 ms interval) — ePHPm's KV has no
-   pub/sub or blocking wait yet. In-process reads make this cheap, but it
-   sets the latency floor.
-4. **No streaming compression.** ePHPm compresses buffered responses
-   (brotli/gzip) but streamed responses go out identity-encoded, so
-   Datastar's shared-brotli-window trick isn't available yet. Proposed as
-   PR-1 in the spec doc.
+3. **Fan-out is version-polling** (100 ms interval) in this demo. At
+   recording time (v0.5.0) ePHPm's KV had no blocking wait; since then
+   `ephpm_kv_wait()` shipped (the PR-2 proposed in the spec doc), so on a
+   current binary the worker could block on a version change instead of
+   polling — `public/worker.php` here still polls and would need a small
+   update to use it.
+4. **No streaming compression on v0.5.0.** The pinned image compresses only
+   buffered responses (brotli/gzip); streamed responses go out
+   identity-encoded. Since then streaming compression shipped in ePHPm as
+   `[server.response] compression_streaming = "sse"` (the PR-1 proposed in
+   the spec doc), enabling Datastar's shared-brotli-window trick on current
+   binaries.
