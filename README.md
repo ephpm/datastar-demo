@@ -2,8 +2,9 @@
 
 > **Note (2026-08):** this demo was recorded against ePHPm **v0.5.0**; current
 > ePHPm is **v0.8.6**. The compose pin is kept at v0.5.0 so the validated
-> behaviour stays reproducible. Two of the "honest limitations" below have
-> since shipped fixes in ePHPm — see the notes inline.
+> behaviour stays reproducible. Two of the original "honest limitations"
+> have since shipped fixes in ePHPm, and this demo now uses both when the
+> server provides them — see [Upstream upgrades](#upstream-upgrades-ephpm--v050).
 
 A multiplayer realtime demo: a shared tap counter, a live presence count,
 and a collaborative 12×12 pixel grid — synced across every open browser tab
@@ -16,7 +17,8 @@ server that embeds PHP — no php-fpm, no Redis, no Node), driven by
    Browser tab A ──┐                       ┌─► worker thread (SSE loop A)
    Browser tab B ──┤  GET /sse (SSE) ──────┼─► worker thread (SSE loop B)
    Browser tab C ──┘                       └─► worker thread (SSE loop C)
-        │                                        ▲        poll board:ver
+        │                                        ▲     wait on board:ver
+        │                                        │    (poll on ≤ v0.5.0)
         │ @post('/tap') / @post('/paint')        │             │
         └────────► worker thread ── ephpm_kv_incr/set ──► native KV store
                                                   (one process, shared state)
@@ -98,4 +100,5 @@ this demo uses both when available:
    `ephpm.toml` (16 here) is the ceiling on concurrent viewers; actions
    compete for the remaining threads. Fine for a demo and small deployments;
    the render-once/fan-out SSE hub that lifts this is on the ePHPm roadmap
-   (`site/content/roadmap/sse-realtime.md`, targeted v0.6.0).
+   (`site/content/roadmap/sse-realtime.md`, targeted v0.7 — not yet
+   implemented as of v0.8.6).
