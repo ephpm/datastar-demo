@@ -66,6 +66,29 @@ oha -z 10s -m POST http://localhost:8080/tap
 | `docs/ephpm-integration-spec.md` | Verified findings on ePHPm's streaming/compression/KV internals + proposed ePHPm PRs |
 | `docs/wordpress-feasibility.md` | Can WordPress be the flashy demo? (verdict: hybrid, later) |
 
+## Upstream upgrades (ePHPm > v0.5.0)
+
+The two ePHPm PRs this repo's spec doc proposed have landed upstream, and
+this demo uses both when available:
+
+- **Push, not poll — `ephpm_kv_wait()`.** `worker.php` feature-detects the
+  function (`function_exists`) and switches the SSE loop from a 100 ms
+  version poll to a blocking wait on `board:ver`. Measured on a local
+  release build (WSL2, same box, same binary, poll vs wait `worker.php`,
+  8 idle SSE clients over 60 s): the poll loop burned **0.35% of one core**
+  at idle (0.21 cpu-s) vs **0.02%** (0.01 cpu-s) for the wait loop, and
+  paint→event first-byte latency (including the POST round-trip) dropped
+  from **p50 100.4 ms** (the poll-interval floor) to **p50 1.2 ms**. On a
+  v0.5.0 image the demo behaves exactly as before.
+- **Streaming brotli for the SSE stream** — uncomment
+  `compression_streaming = "sse"` in `ephpm.toml` on a server that supports
+  it. One brotli encoder per connection, flushed per event, window shared
+  across the stream: a 60 s pixelboard session (120 paints, one fat
+  ~15.6 KB signals+grid re-render each) went from **1,889,173 wire bytes**
+  (~15.6 KB/event) to **4,504 wire bytes** (~37 B/event) — a **~420×**
+  reduction, every event still decodable the instant it arrives. Verify
+  yourself with `curl -N --compressed http://localhost:8080/sse`.
+
 ## Honest limitations (verified, see the spec doc)
 
 1. **SSE requires worker mode.** ePHPm's fpm/drop-in mode buffers the whole
@@ -74,16 +97,5 @@ oha -z 10s -m POST http://localhost:8080/tap
 2. **One SSE connection parks one worker thread.** `worker_count` in
    `ephpm.toml` (16 here) is the ceiling on concurrent viewers; actions
    compete for the remaining threads. Fine for a demo and small deployments;
-   the spec doc proposes the ePHPm changes for real scale.
-3. **Fan-out is version-polling** (100 ms interval) in this demo. At
-   recording time (v0.5.0) ePHPm's KV had no blocking wait; since then
-   `ephpm_kv_wait()` shipped (the PR-2 proposed in the spec doc), so on a
-   current binary the worker could block on a version change instead of
-   polling — `public/worker.php` here still polls and would need a small
-   update to use it.
-4. **No streaming compression on v0.5.0.** The pinned image compresses only
-   buffered responses (brotli/gzip); streamed responses go out
-   identity-encoded. Since then streaming compression shipped in ePHPm as
-   `[server.response] compression_streaming = "sse"` (the PR-1 proposed in
-   the spec doc), enabling Datastar's shared-brotli-window trick on current
-   binaries.
+   the render-once/fan-out SSE hub that lifts this is on the ePHPm roadmap
+   (`site/content/roadmap/sse-realtime.md`, targeted v0.6.0).
