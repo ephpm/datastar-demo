@@ -1,5 +1,10 @@
 # Pixelboard — Datastar on ePHPm
 
+> **Note (2026-08):** this demo was recorded against ePHPm **v0.5.0**; current
+> ePHPm is **v0.8.6**. The compose pin is kept at v0.5.0 so the validated
+> behaviour stays reproducible. Two of the "honest limitations" below have
+> since shipped fixes in ePHPm — see the notes inline.
+
 A multiplayer realtime demo: a shared tap counter, a live presence count,
 and a collaborative 12×12 pixel grid — synced across every open browser tab
 over Server-Sent Events. The whole backend is **one PHP file** running on
