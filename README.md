@@ -90,6 +90,12 @@ this demo uses both when available:
   (~15.6 KB/event) to **4,504 wire bytes** (~37 B/event) — a **~420×**
   reduction, every event still decodable the instant it arrives. Verify
   yourself with `curl -N --compressed http://localhost:8080/sse`.
+- **Batched grid reads — `ephpm_kv_mget()` (ePHPm >= v0.13.0).** Each
+  snapshot reads all 144 `board:px:<i>` keys, and every connected client
+  renders a snapshot on every mutation. `worker.php` feature-detects
+  `ephpm_kv_mget` and fetches the whole grid in one call instead of 144
+  `ephpm_kv_get()` calls. Older servers (including the pinned v0.5.0 image)
+  keep the per-key reads.
 
 ## Honest limitations (verified, see the spec doc)
 

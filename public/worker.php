@@ -82,6 +82,29 @@ function kv_int(string $key): int
     return $v === null ? 0 : (int) $v;
 }
 
+/**
+ * Read several keys at once. Uses ephpm_kv_mget() (ePHPm >= v0.13.0) — one
+ * call into the store instead of one per key — and falls back to per-key
+ * ephpm_kv_get() on older servers (or if the batch call fails).
+ *
+ * @param list<string> $keys
+ * @return list<string|null> aligned with $keys; null = missing
+ */
+function kv_mget(array $keys): array
+{
+    if (\function_exists('ephpm_kv_mget')) {
+        $vals = \ephpm_kv_mget($keys);
+        if (\is_array($vals) && \count($vals) === \count($keys)) {
+            return \array_values($vals);
+        }
+    }
+    $out = [];
+    foreach ($keys as $k) {
+        $out[] = \ephpm_kv_get($k);
+    }
+    return $out;
+}
+
 /** Bump the global state version — every mutation calls this. */
 function bump_version(): void
 {
@@ -96,9 +119,17 @@ function bump_version(): void
  */
 function render_grid(): string
 {
+    // Every connected client re-renders the whole grid on every mutation, so
+    // fetch all CELLS pixels in one batch rather than CELLS separate gets.
+    $keys = [];
+    for ($i = 0; $i < CELLS; $i++) {
+        $keys[] = 'board:px:' . $i;
+    }
+    $px = kv_mget($keys);
+
     $html = '<div id="grid">';
     for ($i = 0; $i < CELLS; $i++) {
-        $c   = \ephpm_kv_get('board:px:' . $i);
+        $c   = $px[$i];
         $bgc = ($c !== null && isset(PALETTE[(int) $c])) ? PALETTE[(int) $c] : BG;
         $html .= '<button id="c-' . $i . '" style="background:' . $bgc . '"'
                . ' data-on:click="@post(\'/paint?i=' . $i . '&amp;c=\' + $color)"></button>';
